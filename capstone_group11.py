@@ -1,53 +1,28 @@
 import pandas as pd
-import os
 import matplotlib.pyplot as plt
 import seaborn as sns
 from sklearn.model_selection import train_test_split
-from sklearn.preprocessing import StandardScaler
 from sklearn.linear_model import LinearRegression
 from sklearn.ensemble import RandomForestRegressor
 from sklearn.tree import DecisionTreeClassifier, plot_tree
 from sklearn.metrics import r2_score, mean_squared_error, accuracy_score, confusion_matrix, classification_report
 
 
-# --- Function 1: Load Data ---
-def load_flight_data(path_or_url):
-    """
-    Load dataset from a local path or a URL.
-    """
-    # 1. Check if it is a network link (starting with "http")
-    if str(path_or_url).startswith(('http://', 'https://')):
-        try:
-            print(f"Loading data from URL: {path_or_url}")
-            return pd.read_csv(path_or_url)
-        except Exception as e:
-            print(f"Error loading from URL: {e}")
-            return None
-
-    # 2. If it is a local path, keep your original logic.
-    # If a folder is passed
-    if os.path.isdir(path_or_url):
-        files = os.listdir(path_or_url)
-        csv_file = next((f for f in files if f.endswith('.csv')), None)
-        if csv_file:
-            full_path = os.path.join(path_or_url, csv_file)
-            print(f"Loading file from folder: {csv_file}")
-            return pd.read_csv(full_path)
-
-    # If a direct file path is passed
-    elif os.path.isfile(path_or_url):
-        print(f"Loading specific file: {path_or_url}")
-        return pd.read_csv(path_or_url)
-
-    print("Error: No CSV file found at the given path or URL.")
-    return None
+# --- DATA EXTRACTION ---
+def load_flight_data(url):
+    """Loads dataset from URL with error handling."""
+    try:
+        df = pd.read_csv(url)
+        print(f"✅ Success: Data loaded! Shape: {df.shape}")
+        return df
+    except Exception as e:
+        print(f"Error loading from URL: {e}")
+        return None
 
 
-# --- Function 2: Clean Column Names ---
+# --- DATA CLEANUP ---
 def clean_column_names(df):
-    """
-    Standardize column names to lowercase and handle spaces.
-    """
+    """Standardizes column names and renames key metrics."""
     df.columns = df.columns.str.strip()
     rename_map = {
         'Departure Date & Time': 'dep_time',
@@ -60,99 +35,147 @@ def clean_column_names(df):
     return df
 
 
-# --- Function 3: Process Date Features ---
 def process_date_features(df):
-    """
-    Extract temporal features from datetime columns.
-    """
-    df['dep_time'] = pd.to_datetime(df['dep_time'])
-    df['dep_month'] = df['dep_time'].dt.month
+    """Extracts month, hour, and day of week from dep_time."""
+    df['dep_time'] = pd.to_datetime(df['dep_time'], errors='coerce')
+    df = df.dropna(subset=['dep_time'])
+    df['dep_month'] = df['dep_time'].dt.month_name()
     df['dep_hour'] = df['dep_time'].dt.hour
-    df['day_of_week'] = df['dep_time'].dt.dayofweek  # 0=Monday, 6=Sunday
+    df['day_of_week'] = df['dep_time'].dt.dayofweek
     return df
 
 
-# --- Function 4: Data Preparation (Encoding & Splitting) ---
-def prepare_data_for_model(df, target_col='price', task='regression'):
+# --- VISUALIZATIONS ---
+def plot_route_price_analysis(df):
+    """Visualization 1: Top 10 Routes by Average Price."""
+    df_route = df.copy()
+    df_route['source'] = df_route['source'].fillna('Unknown').astype(str).str.strip()
+    df_route['destination'] = df_route['destination'].fillna('Unknown').astype(str).str.strip()
+    df_route['route'] = df_route['source'] + " to " + df_route['destination']
+
+    route_stats = df_route.groupby('route')['price'].mean().sort_values(ascending=False).head(10).reset_index()
+
+    plt.figure(figsize=(12, 8))
+    sns.barplot(x='price', y='route', data=route_stats, palette='magma')
+    plt.title('Visualization 1: Top 10 Most Expensive Flight Routes', fontsize=16)
+    plt.xlabel('Average Ticket Price (BDT)')
+    plt.ylabel('Flight Route')
+    plt.tight_layout()
+    plt.show()
+
+
+def plot_price_distribution_boxplot(df):
+    """Visualization 2: Flight Price Distribution by Airline."""
+    plt.figure(figsize=(15, 7))
+    sns.boxplot(x='airline', y='price', data=df, palette='viridis')
+    plt.xticks(rotation=45, ha='right')
+    plt.title('Visualization 2: Flight Price Distribution by Airline', fontsize=16)
+    plt.show()
+
+
+def plot_seasonal_price_analysis(df):
+    """Visualization 3: Monthly Flight Price Distribution (Seasonality)."""
+    month_order = ['January', 'February', 'March', 'April', 'May', 'June',
+                   'July', 'August', 'September', 'October', 'November', 'December']
+    plt.figure(figsize=(12, 6))
+    sns.boxplot(x='dep_month', y='price', data=df, order=month_order, palette='Set3')
+    plt.title('Visualization 3: Monthly Flight Price Distribution', fontsize=16)
+    plt.show()
+
+
+def plot_correlation_heatmap(df):
     """
-    Prepares data for modeling:
-    1. Drops ID-like or redundant columns.
-    2. One-Hot Encodes categorical features.
-    3. Splits into Train/Test sets.
-
-    Args:
-    - task: 'regression' (predict price) or 'classification' (predict cabin class)
+    Plots a heatmap to show correlation between numerical variables.
     """
-    # 1. Select features
-    # Drop derived or leaky columns (like base_fare which is part of price)
-    cols_to_drop = ['dep_time', 'arr_time', 'source_name', 'destination_name',
-                    'base_fare_(bdt)', 'tax_&_surcharge_(bdt)']
+    # 1. Select only numerical columns (Correlation only works with numbers)
+    numerical_df = df.select_dtypes(include=['number'])
 
-    # If doing regression, we predict price, so drop it from X.
-    # If doing classification, we predict class, so drop it from X (and maybe price if we want).
+    # 2. Calculate the correlation matrix
+    corr_matrix = numerical_df.corr()
 
-    data = df.drop(columns=[c for c in cols_to_drop if c in df.columns], errors='ignore')
+    # 3. Create the plot
+    plt.figure(figsize=(10, 8))
 
-    if task == 'regression':
-        X = data.drop(columns=[target_col], errors='ignore')
-        y = df[target_col]
-    else:  # classification (predicting 'class')
-        X = data.drop(columns=[target_col], errors='ignore')
-        y = df[target_col]
+    # 4. Draw the heatmap
+    # annot=True means show the numbers in the boxes
+    # cmap='coolwarm' sets the color scheme (Red=High positive, Blue=High negative)
+    sns.heatmap(corr_matrix, annot=True, cmap='coolwarm', fmt=".2f")
 
-    # 2. One-Hot Encoding for categorical variables
-    # (Pandas get_dummies is smarter than sklearn OneHotEncoder for quick analysis)
-    X_encoded = pd.get_dummies(X, drop_first=True)
-
-    # 3. Train Test Split
-    print(f"Data prepared for {task}. Feature shape: {X_encoded.shape}")
-    return train_test_split(X_encoded, y, test_size=0.2, random_state=42)
+    plt.title('Correlation Heatmap of Flight Variables')
+    plt.show()
 
 
-# --- Function 5: Train Regression Models (Linear & Random Forest) ---
-def train_regression_models(X_train, X_test, y_train, y_test):
-    """
-    Trains and evaluates Linear Regression and Random Forest.
-    """
-    results = {}
+def plot_days_vs_price(df):
+    """Visualization 5: Days Before Departure vs Price."""
+    plt.figure(figsize=(10, 6))
+    sns.scatterplot(data=df, x='days_before_departure', y='price', alpha=0.3, color='blue')
+    plt.title('Visualization 5: Flight Price vs. Days Before Departure')
+    plt.show()
 
-    # Model 1: Linear Regression
-    lr = LinearRegression()
-    lr.fit(X_train, y_train)
-    y_pred_lr = lr.predict(X_test)
-    results['Linear Regression'] = {
-        'R2': r2_score(y_test, y_pred_lr),
-        'RMSE': mean_squared_error(y_test, y_pred_lr) ** 0.5,
-        'model': lr
-    }
 
-    # Model 2: Random Forest (Limited depth to save time on large data)
-    rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42, n_jobs=-1)
+def plot_class_price_distribution(df):
+    """Visualization 6: Price Distribution by Class."""
+    plt.figure(figsize=(8, 6))
+    sns.boxplot(data=df, x='class', y='price', palette='Set2')
+    plt.title('Visualization 6: Price Distribution by Class')
+    plt.show()
+
+# --- Add these imports at the VERY TOP of your file ---
+from sklearn.model_selection import train_test_split
+from sklearn.linear_model import LinearRegression
+from sklearn.metrics import mean_squared_error, r2_score
+
+# ... (your existing code) ...
+
+
+# --- MODELING PIPELINES ---
+def prepare_data(df, target_col, task='regression'):
+    """Prepares features and labels for modeling."""
+    df_mod = df.copy()
+    for col in df_mod.select_dtypes(include=['object']).columns:
+        if col != target_col: df_mod[col] = pd.factorize(df_mod[col])[0]
+    X = df_mod.drop(columns=[target_col, 'dep_time', 'dep_month'], errors='ignore')
+    y = df_mod[target_col]
+    if task == 'classification': y = pd.factorize(y)[0]
+    return train_test_split(X, y, test_size=0.2, random_state=42)
+
+
+def train_linear_regression(df):
+    """Model 1: Multiple Linear Regression."""
+    X_train, X_test, y_train, y_test = prepare_data(df, 'price', 'regression')
+    model = LinearRegression()
+    model.fit(X_train, y_train)
+    y_pred = model.predict(X_test)
+    print(f"Linear Regression R2: {r2_score(y_test, y_pred):.4f}")
+    plt.scatter(y_test, y_pred, alpha=0.3)
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+    plt.title('Model 1: Linear Regression - Actual vs Predicted')
+    plt.show()
+    return model
+
+
+def run_regression_pipeline(df):
+    """Model 2: Random Forest Regressor."""
+    X_train, X_test, y_train, y_test = prepare_data(df, 'price', 'regression')
+    rf = RandomForestRegressor(n_estimators=50, max_depth=10, random_state=42)
     rf.fit(X_train, y_train)
-    y_pred_rf = rf.predict(X_test)
-    results['Random Forest'] = {
-        'R2': r2_score(y_test, y_pred_rf),
-        'RMSE': mean_squared_error(y_test, y_pred_rf) ** 0.5,
-        'model': rf
-    }
+    y_pred = rf.predict(X_test)
+    print(f"Random Forest R2: {r2_score(y_test, y_pred):.4f}")
+    plt.scatter(y_test, y_pred, alpha=0.3, color='teal')
+    plt.plot([y_test.min(), y_test.max()], [y_test.min(), y_test.max()], 'r--')
+    plt.title('Model 2: Random Forest - Actual vs Predicted')
+    plt.show()
+    return rf
 
-    return results
 
-
-# --- Function 6: Train Classification Model (Decision Tree) ---
-def train_classification_model(X_train, X_test, y_train, y_test):
-    """
-    Trains and evaluates Decision Tree Classifier.
-    """
-    # Model 3: Decision Tree
-    dt = DecisionTreeClassifier(max_depth=5, random_state=42)
+def run_classification_pipeline(df):
+    """Model 3: Decision Tree Classifier."""
+    X_train, X_test, y_train, y_test = prepare_data(df, 'class', 'classification')
+    dt = DecisionTreeClassifier(max_depth=3, random_state=42)
     dt.fit(X_train, y_train)
-    y_pred = dt.predict(X_test)
+    plt.figure(figsize=(20, 10))
+    plot_tree(dt, feature_names=list(X_train.columns), filled=True, fontsize=10)
+    plt.title('Model 3: Decision Tree Structure')
+    plt.show()
+    return dt
 
-    acc = accuracy_score(y_test, y_pred)
-    cm = confusion_matrix(y_test, y_pred)
-
-    print(f"Decision Tree Accuracy: {acc:.4f}")
-    print("Classification Report:\n", classification_report(y_test, y_pred))
-
-    return dt, cm
