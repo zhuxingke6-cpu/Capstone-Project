@@ -15,7 +15,7 @@ def load_flight_data(path_or_url):
     """
     Load dataset from a local path or a URL.
     """
-    # 1. 检查是否是网络链接 (以 http 开头)
+    # 1. Check if it is a network link (starting with "http")
     if str(path_or_url).startswith(('http://', 'https://')):
         try:
             print(f"Loading data from URL: {path_or_url}")
@@ -24,7 +24,7 @@ def load_flight_data(path_or_url):
             print(f"Error loading from URL: {e}")
             return None
 
-    # 2. 如果是本地路径，保留你原有的逻辑
+    # 2. If it is a local path, keep your original logic.
     # If a folder is passed
     if os.path.isdir(path_or_url):
         files = os.listdir(path_or_url)
